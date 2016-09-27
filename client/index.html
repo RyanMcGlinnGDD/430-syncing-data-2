@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <style>
+      *{
+        margin: 0;
+      }
+      #wrapper{
+        position: relative;
+        width: 1336px;
+        height: 768px;
+        background-color: cornflowerblue;
+      }
+      .circle{
+        position: absolute;
+        border-radius: 50%;
+      }
+      .blinder{
+        position: absolute;
+        background: black;
+        opacity: .5;
+        width: "1336px";
+        height: "768";
+        top: "0px";
+        left: "0px";
+      }
+	</style>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://npmcdn.com/babel-core@5.8.38/browser.min.js"></script>
+    <script type="text/babel" >
+      "use strict";
+      let socket;
+
+      let targets;
+      let userId;
+      let active;
+      let team;
+      //fired when app client starts, initializes socket logic
+      const init = () => {
+        targets = {};
+        active = false;
+        
+        //assign event handlers
+        setupSocket();
+        
+        document.getElementById("Reset").addEventListener('click', () => {
+          socket.emit('reset');
+        });
+        
+        //join the room
+        let time = new Date().getTime();
+        socket.emit('join', time);
+        
+        //begin loop
+        loop();
+      }
+
+      //when socket is connected, adds event handlers
+      const setupSocket = () => {
+        //establish socket connection
+        socket = io.connect();
+        
+        // sync local set with server and set userId
+        socket.on('serveUserId', (data) => {
+          userId = data;
+          socket.userId = userId;
+        });
+        socket.on('reset', () => {
+          init();
+        });
+        // 
+        socket.on('serveAssignPlayers', (data) => {
+          if(data.p1 === userId){
+            active = true;
+            team = "red";
+            document.getElementById("messageLine1").innerHTML = `YOU are RED player`;
+          } else if(data.p2 === userId){
+            active = true;
+            team = "blue";
+            document.getElementById("messageLine1").innerHTML = `YOU are BLU player`;
+          }
+        });
+        //fires when the server is already full
+        socket.on('serveFailedToJoin', () => {
+          document.getElementById("messageLine1").innerHTML = "The game session is currently full. Please try again later.";
+        });
+        socket.on('serveResults', (data) => {
+          let blinder = document.createElement("DIV");
+          blinder.className = "blinder";
+          document.body.appendChild(blinder);
+          document.getElementById("messageLine1").innerHTML = `${data}`;
+        });
+        socket.on('serveScore', (data) => {
+          document.getElementById("messageLine2").innerHTML = `Red Player Score: ${data.p1}`;
+          document.getElementById("messageLine3").innerHTML = `Blu Player Score: ${data.p2}`;
+        });
+        socket.on('serveRemoveTarget', (data) => {
+          targets[data].style.background = "gray";
+          delete targets[data];
+        });
+        // add a new shape or update a shape to the local set
+        socket.on('serveNewTarget', (data) => {
+          console.log("serving new target");
+          //test to see if a DOM element can be properly generated
+          let piece = document.createElement("DIV");
+          piece.className = "circle";
+          piece.id = `${data.team}${data.t}`;
+          piece.diam = 0;
+          piece.y = data.y;
+          piece.x = data.x;
+          piece.time = data.t;
+          piece.team = data.team;
+          piece.addEventListener('click', (e) => {
+            let time = new Date().getTime();
+            socket.emit('requestScoring', { userTeam: team, targetTeam: e.target.team, t: piece.time, });
+          });
+          document.getElementById("wrapper").appendChild(piece);
+          
+          //also add to the targets object
+          targets[piece.id] = piece;
+        });
+      }
+
+      const loop = () => {
+        window.requestAnimationFrame(loop.bind(this));
+        
+        let keys = Object.keys(targets);
+        //for loop for every shape
+        for(let i = 0; i < keys.length; i++){
+          const piece = targets[keys[i]];
+          
+          //update values of the piece
+          piece.diam += .4;
+          if(piece.diam > 100){
+            piece.diam = 100;
+          }
+          piece.style.width = `${piece.diam}px`;
+          piece.style.height = `${piece.diam}px`;
+          piece.style.top = `${piece.y - piece.diam/2}px`;
+          piece.style.left = `${piece.x - piece.diam/2}px`;
+          piece.style.background = piece.team;
+        }
+      };
+      
+      window.onload = init;
+    </script>
+</head>
+<body id="body">
+  <div id='wrapper'>
+  </div>
+  <p id="messageLine1"></p>
+  <p id="messageLine2"></p>
+  <p id="messageLine3"></p>
+  <button id="Reset">RESET</button>
+</body>
+</html>
