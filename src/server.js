@@ -21,48 +21,59 @@ console.log(`listening on 127.0.0.1: ${port}`);
 // pass http server into socketio
 const io = socketio(app);
 
-// const targets = {};
 const players = {};
 let gameState = 0;
-let player1Score = 0;
-let player2Score = 0;
+let player1 = { userId: -1, score: 0 };
+let player2 = { userId: -1, score: 0 };
 
 // join logic, adds users to room1
 const onJoined = (sock) => {
   const socket = sock;
 
+  // catches join requests that fire when users initialize
   socket.on('join', () => {
-    if(true) {
-      socket.join('room1');
+    socket.join('room1');
 
-      let userId;
-      let flag = true;
-      while (flag) {
-        userId = `user${Math.floor(Math.random() * 10000) + 1}`;
-        if (players[userId] !== null) {
-          flag = false;
-        }
-      }
-      // give a placeholder value
-      players[userId] = userId;
-
-      socket.emit('serveUserId', userId);
-      // save userId to socket so disconnect can be handled
-      socket.userId = userId;
-
-      console.log(`${socket.userId} joined the server...`);
-
-      if (gameState === 0) {
-        const keys = Object.keys(players);
-        if (keys.length >= 2) {
-          // emit to player 1 and 2 that they are active
-          io.sockets.in('room1').emit('serveAssignPlayers', { p1: players[keys[0]], p2: players[keys[1]] });
-
-          gameState = 1;
-        }
+    // assign a player ID
+    let userId;
+    let flag = true;
+    while (flag) {
+      userId = `user${Math.floor(Math.random() * 10000) + 1}`;
+      if (players[userId] !== null) {
+        flag = false;
       }
     }
+    // give a value denoting participation status
+    players[userId] = { team: 'spectator' };
+
+    socket.emit('serveUserId', userId);
+    // save userId to socket so disconnect can be handled
+    socket.userId = userId;
   });
+
+  // catches game join requests that fire when users click the join button
+  socket.on('requestJoinGame', (data) => {
+    // serveAssignPlayer1
+    if (player1.userId === -1) {
+      player1.userId = data;
+      socket.emit('serveAssignPlayer1');
+    } else if (player2.userId === -1) {
+      player2.userId = data;
+      socket.emit('serveAssignPlayer2');
+      // start the round
+      gameState = 1;
+    } else {
+      socket.emit('serveRejectJoin');
+    }
+  });
+};
+
+// resets the round
+const resetRound = () => {
+  gameState = 0;
+  player1 = { userId: -1, score: 0 };
+  player2 = { userId: -1, score: 0 };
+  io.sockets.in('room1').emit('serveScore', { p1: 0, p2: 0 });
 };
 
 // handles requests
@@ -71,36 +82,39 @@ const onTargetRequest = (sock) => {
   socket.on('requestDiagnostic', (data) => {
     console.log(`${data}`);
   });
-  socket.on('reset', () => {
-    io.sockets.in('room1').emit('reset');
-    players = {};
-    gameState = 0;
-    player1Score = 0;
-    player2Score = 0;
-  });
   socket.on('requestScoring', (data) => {
     // increase score
     if (data.userTeam === data.targetTeam) {
       if (data.userTeam === 'red') {
-        player1Score += 10;
+        player1.score += Math.floor(data.size);
       } else {
-        player2Score += 10;
+        player2.score += Math.floor(data.size);
+      }
+    } else if (data.userTeam !== data.targetTeam) {
+      if (data.userTeam === 'red') {
+        player1.score -= 25;
+      } else {
+        player2.score -= 25;
       }
     }
     // emit serve remove shape (includes)
     io.sockets.in('room1').emit('serveRemoveTarget', `${data.targetTeam}${data.t}`);
     // emit score
-    io.sockets.in('room1').emit('serveScore', { p1: player1Score, p2: player2Score });
-    
-    if(player1Score >= 100){
-      io.sockets.in('room1').emit('serveResults', "Red has won");
-      gameState = 3;
-    } else if(player2Score >= 100){
-      io.sockets.in('room1').emit('serveResults', "Blu has won");
-      gameState = 3;
+    io.sockets.in('room1').emit('serveScore', { p1: player1.score, p2: player2.score });
+
+    // check to see if anyone has scored more than the max points threshold
+    if (player1.score >= 1000) {
+      io.sockets.in('room1').emit('serveResults', 'Red has won');
+      gameState = 0;
+      resetRound();
+    } else if (player2.score >= 1000) {
+      io.sockets.in('room1').emit('serveResults', 'Blu has won');
+      gameState = 0;
+      resetRound();
     }
   });
 };
+
 
 // disconnect logic, removes users from room1
 const onDisconnect = (sock) => {
@@ -109,15 +123,24 @@ const onDisconnect = (sock) => {
   socket.on('disconnect', () => {
     console.log(`${socket.userId} disconnecting from server...`);
 
+    // check and see if the player leaving is either of the active players
+    if (gameState === 1) {
+      if (player1.userId === socket.userId || player2.userId === socket.userId) {
+        // serveEndByDisconnect
+        io.sockets.in('room1').emit('serveEndByDisconnect');
+        resetRound();
+      }
+    }
+
     delete players[socket.userId];
 
     // leave the room
     socket.leave('room1');
-    gameState = 0;
   });
 };
 
-// connect logic, attaches events
+
+// attaches events
 io.sockets.on('connection', (socket) => {
   console.log('connecting');
 

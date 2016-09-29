@@ -3,7 +3,7 @@
 <head>
     <style>
       *{
-        margin: 0;
+        font-family: 'Open Sans', sans-serif;
       }
       #wrapper{
         position: relative;
@@ -15,16 +15,8 @@
         position: absolute;
         border-radius: 50%;
       }
-      .blinder{
-        position: absolute;
-        background: black;
-        opacity: .5;
-        width: "1336px";
-        height: "768";
-        top: "0px";
-        left: "0px";
-      }
 	</style>
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans" rel="stylesheet">
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://npmcdn.com/babel-core@5.8.38/browser.min.js"></script>
     <script type="text/babel" >
@@ -33,21 +25,22 @@
 
       let targets;
       let userId;
-      let active;
       let team;
       //fired when app client starts, initializes socket logic
       const init = () => {
         targets = {};
-        active = false;
+        team = "spectator";
         
         //assign event handlers
         setupSocket();
         
-        document.getElementById("Reset").addEventListener('click', () => {
-          socket.emit('reset');
+        //event in which the player attempts to join the game session
+        document.getElementById("JoinButton").addEventListener('click', () => {
+          let time = new Date().getTime();
+          socket.emit('requestJoinGame', userId);
         });
         
-        //join the room
+        
         let time = new Date().getTime();
         socket.emit('join', time);
         
@@ -65,39 +58,49 @@
           userId = data;
           socket.userId = userId;
         });
-        socket.on('reset', () => {
-          init();
+          
+        //assigns players at the start of the round
+        socket.on('serveAssignPlayer1', () => {
+          team = "red";
+          document.getElementById("messageLine1").innerHTML = `You are RED player`;
+          document.getElementById("messageLine1").style.color = "red";
         });
-        // 
-        socket.on('serveAssignPlayers', (data) => {
-          if(data.p1 === userId){
-            active = true;
-            team = "red";
-            document.getElementById("messageLine1").innerHTML = `YOU are RED player`;
-          } else if(data.p2 === userId){
-            active = true;
-            team = "blue";
-            document.getElementById("messageLine1").innerHTML = `YOU are BLU player`;
-          }
+          
+        socket.on('serveAssignPlayer2', () => {
+          team = "blue";
+          document.getElementById("messageLine1").innerHTML = `You are BLUE player`;
+          document.getElementById("messageLine1").style.color = "blue";
         });
-        //fires when the server is already full
-        socket.on('serveFailedToJoin', () => {
-          document.getElementById("messageLine1").innerHTML = "The game session is currently full. Please try again later.";
+          
+        socket.on('serveRejectJoin', () => {
+          document.getElementById("messageLine1").innerHTML = `The game session is currently full. Please try again next round.`;
         });
+          
+        socket.on('serveEndByDisconnect', () => {
+          //the game has ended early due to someone disconnecting. Both player objects have been reset on server side, everything must reset client side as well
+          document.getElementById("messageLine1").innerHTML = `A player disconnected, causing the game to end. A new round will begin`;
+          reset();
+        });
+        
+        //receives results from server at the end of a round
         socket.on('serveResults', (data) => {
-          let blinder = document.createElement("DIV");
-          blinder.className = "blinder";
-          document.body.appendChild(blinder);
           document.getElementById("messageLine1").innerHTML = `${data}`;
+          //reset the game here
+          reset();
         });
+          
+        //receives fresh score data from the server when ready
         socket.on('serveScore', (data) => {
           document.getElementById("messageLine2").innerHTML = `Red Player Score: ${data.p1}`;
-          document.getElementById("messageLine3").innerHTML = `Blu Player Score: ${data.p2}`;
+          document.getElementById("messageLine3").innerHTML = `Blue Player Score: ${data.p2}`;
         });
+          
+        //makes a clicked target inactive
         socket.on('serveRemoveTarget', (data) => {
           targets[data].style.background = "gray";
           delete targets[data];
         });
+          
         // add a new shape or update a shape to the local set
         socket.on('serveNewTarget', (data) => {
           console.log("serving new target");
@@ -110,10 +113,13 @@
           piece.x = data.x;
           piece.time = data.t;
           piece.team = data.team;
-          piece.addEventListener('click', (e) => {
-            let time = new Date().getTime();
-            socket.emit('requestScoring', { userTeam: team, targetTeam: e.target.team, t: piece.time, });
-          });
+          if(team!== "spectator"){
+            piece.addEventListener('click', (e) => {
+              let time = new Date().getTime();
+              socket.emit('requestScoring', { userTeam: team, targetTeam: e.target.team, t: piece.time, size: piece.diam });
+            });
+          }
+          
           document.getElementById("wrapper").appendChild(piece);
           
           //also add to the targets object
@@ -121,6 +127,14 @@
         });
       }
 
+      const reset = () => {
+        
+        document.getElementById("wrapper").innerHTML = "";
+        targets = {};
+        team = "spectator";
+      };
+      
+      //fires once a frame, draws stuff
       const loop = () => {
         window.requestAnimationFrame(loop.bind(this));
         
@@ -146,11 +160,18 @@
     </script>
 </head>
 <body id="body">
+  <h1>Circle Syncer</h1>
   <div id='wrapper'>
   </div>
-  <p id="messageLine1"></p>
-  <p id="messageLine2"></p>
-  <p id="messageLine3"></p>
-  <button id="Reset">RESET</button>
+  <p id="messageLine1">You are currently spectating</p>
+  <p id="messageLine2">Red Player Score: 0</p>
+  <p id="messageLine3">Blue Player Score: 0</p>
+  <button id="JoinButton">JOIN GAME</button>
+  <h2>How to play:</h2>
+  <p>2 players can join at any one time. Upon successfully joining, you will be assigned a color, red or blue.</p>
+  <p>The object of the game is to click the expanding colored circles to gain points and be the first to reach a total of 1000.</p>
+  <p>The number of points gained is proportional to the size of the circle when it is clicked</p>
+  <p>You will only gain points for circles of your designated color.</p>
+  <p>You will receive a point penalty for clicking circles of your opponent's color, however this can be used strategically to prevent your opponent from scoring themselves. The point penalty is always the same and will not scale with circle size.</p>
 </body>
 </html>
